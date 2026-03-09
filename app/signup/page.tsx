@@ -1,9 +1,9 @@
 import { auth } from "@clerk/nextjs/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { SignInForm } from "./sign-in-form";
+import { SignUpForm } from "./sign-up-form";
 
-export default async function Home() {
+export default async function SignupPage() {
   const { userId } = await auth();
 
   if (userId) {
@@ -24,27 +24,27 @@ export default async function Home() {
                   GroupsApp
                 </p>
                 <h1 className="mt-4 font-[family-name:var(--font-display)] text-5xl leading-none">
-                  Iniciar sesión
+                  Crear cuenta
                 </h1>
                 <p className="mt-4 text-sm leading-7 text-[var(--muted-strong)]">
-                  Clerk entrará aquí. Por ahora dejamos la experiencia visual y la
-                  base de datos migradas a Convex.
+                  Clerk manejará este flujo. Aquí dejamos lista la pantalla de alta y
+                  el backend ya cambió a Convex.
                 </p>
               </div>
 
-              <SignInForm />
+              <SignUpForm />
 
               <div className="mt-4 rounded-[18px] border border-[#b8d7cb] bg-[#f2fbf6] px-4 py-3 text-sm text-[#3f6d56]">
-                Login real con Clerk usando esta misma UI. Convex sigue como backend.
+                Alta real con Clerk usando formulario propio. Convex queda como backend principal.
               </div>
 
               <div className="mt-8 text-center text-sm text-[var(--muted-strong)]">
-                ¿No tienes cuenta?{" "}
+                ¿Ya tienes cuenta?{" "}
                 <Link
                   className="underline decoration-black/15 underline-offset-4 transition hover:decoration-black/40"
-                  href="/signup"
+                  href="/"
                 >
-                  Crear una
+                  Inicia sesión
                 </Link>
               </div>
             </div>
