@@ -8,7 +8,7 @@ import { startTransition, useState } from "react";
 export function SignInForm() {
   const { fetchStatus, signIn } = useSignIn();
   const router = useRouter();
-  const [identifier, setIdentifier] = useState("jane");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
