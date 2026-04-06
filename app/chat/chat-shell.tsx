@@ -2,7 +2,13 @@
 
 import { useUser } from "@clerk/nextjs";
 import { useMutation, useQuery } from "convex/react";
-import { startTransition, useDeferredValue, useEffect, useState } from "react";
+import {
+  startTransition,
+  useDeferredValue,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
@@ -13,7 +19,9 @@ type InboxItem = {
   name: string;
   avatar: string;
   preview: string;
-  time: string;
+  createdAt?: number;
+  legacyTimeLabel?: string;
+  time?: string;
   accent: string;
   active: boolean;
   membersLabel: string;
@@ -28,7 +36,9 @@ type SidebarChannel = {
 type ChatMessage = {
   id: Id<"messages">;
   author: string;
-  time: string;
+  createdAt?: number;
+  legacyTimeLabel?: string;
+  time?: string;
   own: boolean;
   body: string;
 };
@@ -555,6 +565,7 @@ function ChatLayout({
   onToggleAdmin?: (member: GroupMember) => void;
 }) {
   const { user } = useUser();
+  const messagesViewportRef = useRef<HTMLDivElement | null>(null);
   const workspaceName =
     user?.username ?? user?.firstName ?? data.workspace.name;
   const workspaceInitials =
@@ -562,8 +573,25 @@ function ChatLayout({
     user?.firstName?.slice(0, 2).toUpperCase() ??
     data.workspace.initials;
 
+  useEffect(() => {
+    const viewport = messagesViewportRef.current;
+
+    if (!viewport) {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      viewport.scrollTop = viewport.scrollHeight;
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [
+    conversationData.activeConversation?.id,
+    conversationData.messages.length,
+  ]);
+
   return (
-    <main className="min-h-screen bg-[#f7f7f4] text-[#2f373c]">
+    <main className="min-h-screen bg-[#f7f7f4] text-[#2f373c] lg:h-screen lg:overflow-hidden">
       {notice ? (
         <div
           aria-live="polite"
@@ -576,134 +604,136 @@ function ChatLayout({
         </div>
       ) : null}
 
-      <div className="grid min-h-screen lg:grid-cols-[370px_minmax(0,1fr)]">
-        <aside className="border-r border-[#e7e7e1] bg-[linear-gradient(180deg,#fbfbf9_0%,#f8f8f6_100%)] px-5 py-7">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#f3eee7] text-[11px] tracking-[0.15em] text-[#9a9891]">
-                {workspaceInitials}
+      <div className="grid min-h-screen lg:h-full lg:min-h-0 lg:grid-cols-[370px_minmax(0,1fr)]">
+        <aside className="border-r border-[#e7e7e1] bg-[linear-gradient(180deg,#fbfbf9_0%,#f8f8f6_100%)] px-5 py-7 lg:flex lg:min-h-0 lg:flex-col lg:overflow-hidden">
+          <div className="lg:flex-1 lg:min-h-0 lg:overflow-y-auto lg:pr-2 scroll-shell">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#f3eee7] text-[11px] tracking-[0.15em] text-[#9a9891]">
+                  {workspaceInitials}
+                </div>
+                <div>
+                  <p className="text-[14px] font-medium text-[#252d31]">
+                    {workspaceName}
+                  </p>
+                  <p className="mt-1 text-[12px] text-[#8f9598]">{status}</p>
+                </div>
               </div>
-              <div>
-                <p className="text-[14px] font-medium text-[#252d31]">
-                  {workspaceName}
+              <SignOutButton />
+            </div>
+
+            <div className="mt-8 rounded-[20px] border border-[#dbe3df] bg-white/85 p-4 shadow-[0_12px_30px_rgba(26,39,44,0.04)]">
+              <div className="flex items-center justify-between">
+                <p className="text-[13px] font-semibold text-[#6e7579]">
+                  Nuevo grupo
                 </p>
-                <p className="mt-1 text-[12px] text-[#8f9598]">{status}</p>
-              </div>
-            </div>
-            <SignOutButton />
-          </div>
-
-          <div className="mt-8 rounded-[20px] border border-[#dbe3df] bg-white/85 p-4 shadow-[0_12px_30px_rgba(26,39,44,0.04)]">
-            <div className="flex items-center justify-between">
-              <p className="text-[13px] font-semibold text-[#6e7579]">
-                Nuevo grupo
-              </p>
-              <button
-                className="rounded-full bg-[#e8f7fb] px-3 py-1 text-[12px] font-medium text-[#2f6d77]"
-                onClick={onToggleCreateGroup}
-                type="button"
-              >
-                {showCreateGroup ? "Cerrar" : "Crear"}
-              </button>
-            </div>
-
-            {showCreateGroup ? (
-              <div className="mt-4 space-y-3">
-                <input
-                  className="w-full rounded-2xl border border-[#d7ddda] bg-[#fcfcfb] px-4 py-3 text-[14px] outline-none"
-                  onChange={(event) =>
-                    onCreateGroupNameChange?.(event.target.value)
-                  }
-                  placeholder="Nombre del grupo"
-                  value={createGroupName}
-                />
-                <textarea
-                  className="min-h-24 w-full rounded-2xl border border-[#d7ddda] bg-[#fcfcfb] px-4 py-3 text-[14px] outline-none"
-                  onChange={(event) =>
-                    onCreateGroupUsernamesChange?.(event.target.value)
-                  }
-                  placeholder="Usernames a invitar, separados por coma"
-                  value={createGroupUsernames}
-                />
                 <button
-                  className="w-full rounded-2xl bg-[#bbe4eb] px-4 py-3 text-[14px] font-medium text-white disabled:bg-[#d5e5e8]"
-                  disabled={isCreatingGroup || !createGroupName.trim()}
-                  onClick={onCreateGroup}
+                  className="rounded-full bg-[#e8f7fb] px-3 py-1 text-[12px] font-medium text-[#2f6d77]"
+                  onClick={onToggleCreateGroup}
                   type="button"
                 >
-                  {isCreatingGroup ? "Creando..." : "Crear grupo"}
+                  {showCreateGroup ? "Cerrar" : "Crear"}
                 </button>
               </div>
-            ) : (
-              <p className="mt-3 text-[13px] leading-6 text-[#7d858a]">
-                El creador queda como admin y puede invitar usuarios por su
-                username.
-              </p>
-            )}
-          </div>
 
-          <div className="mt-10">
-            <div className="flex items-center justify-between">
-              <p className="text-[13px] font-semibold text-[#6e7579]">
-                Tus grupos
-              </p>
-              <span className="text-[12px] text-[#8f9598]">
-                {data.inboxItems.length}
-              </span>
+              {showCreateGroup ? (
+                <div className="mt-4 space-y-3">
+                  <input
+                    className="w-full rounded-2xl border border-[#d7ddda] bg-[#fcfcfb] px-4 py-3 text-[14px] outline-none"
+                    onChange={(event) =>
+                      onCreateGroupNameChange?.(event.target.value)
+                    }
+                    placeholder="Nombre del grupo"
+                    value={createGroupName}
+                  />
+                  <textarea
+                    className="min-h-24 w-full rounded-2xl border border-[#d7ddda] bg-[#fcfcfb] px-4 py-3 text-[14px] outline-none"
+                    onChange={(event) =>
+                      onCreateGroupUsernamesChange?.(event.target.value)
+                    }
+                    placeholder="Usernames a invitar, separados por coma"
+                    value={createGroupUsernames}
+                  />
+                  <button
+                    className="w-full rounded-2xl bg-[#bbe4eb] px-4 py-3 text-[14px] font-medium text-white disabled:bg-[#d5e5e8]"
+                    disabled={isCreatingGroup || !createGroupName.trim()}
+                    onClick={onCreateGroup}
+                    type="button"
+                  >
+                    {isCreatingGroup ? "Creando..." : "Crear grupo"}
+                  </button>
+                </div>
+              ) : (
+                <p className="mt-3 text-[13px] leading-6 text-[#7d858a]">
+                  El creador queda como admin y puede invitar usuarios por su
+                  username.
+                </p>
+              )}
             </div>
-            <div className="mt-4 space-y-2 text-[17px] text-[#394247]">
-              {data.inboxItems.map((item) => (
-                <button
-                  key={item.id}
-                  className={`w-full rounded-2xl px-4 py-3 text-left transition ${
-                    item.active ? "bg-[#e8f7fb]" : "hover:bg-white/80"
-                  }`}
-                  onClick={() => onSelectConversation?.(item.id)}
-                  type="button"
-                >
-                  <div className="flex items-center gap-3">
-                    <span style={{ color: item.accent }}>#</span>
-                    <span className="truncate font-medium">{item.name}</span>
-                    <span className="ml-auto text-[12px] text-[#8f9598]">
-                      {item.time}
-                    </span>
+
+            <div className="mt-10">
+              <div className="flex items-center justify-between">
+                <p className="text-[13px] font-semibold text-[#6e7579]">
+                  Tus grupos
+                </p>
+                <span className="text-[12px] text-[#8f9598]">
+                  {data.inboxItems.length}
+                </span>
+              </div>
+              <div className="mt-4 space-y-2 text-[17px] text-[#394247]">
+                {data.inboxItems.map((item) => (
+                  <button
+                    key={item.id}
+                    className={`w-full rounded-2xl px-4 py-3 text-left transition ${
+                      item.active ? "bg-[#e8f7fb]" : "hover:bg-white/80"
+                    }`}
+                    onClick={() => onSelectConversation?.(item.id)}
+                    type="button"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span style={{ color: item.accent }}>#</span>
+                      <span className="truncate font-medium">{item.name}</span>
+                      <span className="ml-auto text-[12px] text-[#8f9598]">
+                        {formatClientTime(item)}
+                      </span>
+                    </div>
+                    <p className="mt-2 truncate text-[13px] text-[#7f878b]">
+                      {item.preview}
+                    </p>
+                    <p className="mt-1 text-[12px] text-[#4a95a0]">
+                      {item.membersLabel}
+                    </p>
+                  </button>
+                ))}
+                {data.inboxItems.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-[#d6ddda] px-4 py-5 text-[14px] text-[#7c8489]">
+                    Aún no perteneces a ningún grupo.
                   </div>
-                  <p className="mt-2 truncate text-[13px] text-[#7f878b]">
-                    {item.preview}
-                  </p>
-                  <p className="mt-1 text-[12px] text-[#4a95a0]">
-                    {item.membersLabel}
-                  </p>
-                </button>
-              ))}
-              {data.inboxItems.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-[#d6ddda] px-4 py-5 text-[14px] text-[#7c8489]">
-                  Aún no perteneces a ningún grupo.
-                </div>
-              ) : null}
+                ) : null}
+              </div>
             </div>
-          </div>
 
-          <div className="mt-10">
-            <p className="text-[13px] font-semibold text-[#6e7579]">
-              Flujos activos
-            </p>
-            <div className="mt-4 space-y-2">
-              {data.channels.map((channel) => (
-                <div
-                  key={channel.name}
-                  className="flex items-center gap-3 rounded-xl px-4 py-3 text-[14px] text-[#5e686d]"
-                >
-                  <span style={{ color: channel.color }}>•</span>
-                  <span>{channel.name}</span>
-                </div>
-              ))}
+            <div className="mt-10">
+              <p className="text-[13px] font-semibold text-[#6e7579]">
+                Flujos activos
+              </p>
+              <div className="mt-4 space-y-2">
+                {data.channels.map((channel) => (
+                  <div
+                    key={channel.name}
+                    className="flex items-center gap-3 rounded-xl px-4 py-3 text-[14px] text-[#5e686d]"
+                  >
+                    <span style={{ color: channel.color }}>•</span>
+                    <span>{channel.name}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </aside>
 
-        <section className="flex min-h-screen flex-col bg-white">
-          <header className="border-b border-[#e7e7e1] px-6 py-4">
+        <section className="flex min-h-screen flex-col bg-white lg:h-full lg:min-h-0 lg:overflow-hidden">
+          <header className="shrink-0 border-b border-[#e7e7e1] px-6 py-4">
             {conversationData.activeConversation ? (
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div className="flex items-center gap-4">
@@ -750,7 +780,7 @@ function ChatLayout({
 
           {conversationData.activeConversation?.canManageGroup &&
           isManagingGroup ? (
-            <section className="border-b border-[#eef1ed] bg-[#fbfcfb] px-6 py-5">
+            <section className="shrink-0 border-b border-[#eef1ed] bg-[#fbfcfb] px-6 py-5">
               <div className="grid gap-6 xl:grid-cols-[minmax(0,320px)_minmax(0,1fr)]">
                 <div className="rounded-[22px] border border-[#dde5e0] bg-white p-4">
                   <p className="text-[13px] font-semibold text-[#6e7579]">
@@ -890,7 +920,10 @@ function ChatLayout({
             </section>
           ) : null}
 
-          <div className="flex-1 px-6 py-8">
+          <div
+            className="flex-1 px-6 py-8 lg:min-h-0 lg:overflow-y-auto lg:pr-4 scroll-shell"
+            ref={messagesViewportRef}
+          >
             {conversationData.messages.length ? (
               conversationData.messages.map((message, index) => {
                 if (message.own) {
@@ -900,7 +933,7 @@ function ChatLayout({
                         {message.body}
                       </div>
                       <p className="mt-2 text-right text-[13px] text-[#7c8489]">
-                        {message.time}
+                        {formatClientTime(message)}
                       </p>
                     </div>
                   );
@@ -917,7 +950,7 @@ function ChatLayout({
                       </div>
                       <div>
                         <p className="mb-2 text-[13px] text-[#7c8489]">
-                          {message.author} {message.time}
+                          {message.author} {formatClientTime(message)}
                         </p>
                         <div className="max-w-[390px] rounded-[18px] bg-[#f3f5f5] px-5 py-4 text-[17px] text-[#283136]">
                           {message.body}
@@ -934,28 +967,36 @@ function ChatLayout({
             )}
           </div>
 
-          <div className="px-6 pb-5">
-            <div className="rounded-[18px] border border-[#cfd3d2] px-5 py-5 shadow-[0_3px_10px_rgba(26,39,44,0.03)]">
+          <div className="shrink-0 px-6 pb-4">
+            <div className="rounded-[18px] border border-[#cfd3d2] px-5 py-4 shadow-[0_3px_10px_rgba(26,39,44,0.03)]">
               <label
-                className="text-[16px] text-[#959b9f]"
+                className="text-[15px] text-[#959b9f]"
                 htmlFor="chat-draft"
               >
                 Mensaje al grupo
               </label>
               <textarea
-                className="mt-4 min-h-[130px] w-full resize-none bg-transparent text-[16px] text-[#2b3438] outline-none disabled:text-[#99a2a7]"
+                className="mt-3 min-h-[72px] w-full resize-none bg-transparent text-[16px] leading-7 text-[#2b3438] outline-none disabled:text-[#99a2a7]"
                 disabled={draftDisabled}
                 id="chat-draft"
                 onChange={(event) => onDraftChange?.(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter" || event.shiftKey) {
+                    return;
+                  }
+
+                  event.preventDefault();
+                  onSendMessage?.();
+                }}
                 placeholder="Escribe un mensaje para este grupo"
                 value={draft}
               />
-              <div className="mt-4 flex items-center justify-between">
+              <div className="mt-3 flex items-center justify-between">
                 <div className="text-[13px] text-[#7b8186]">
                   Solo los miembros del grupo pueden escribir.
                 </div>
                 <button
-                  className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#bbe4eb] text-[20px] text-white disabled:bg-[#d5e5e8]"
+                  className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#bbe4eb] text-[18px] text-white disabled:bg-[#d5e5e8]"
                   disabled={draftDisabled || !draft.trim()}
                   onClick={onSendMessage}
                   type="button"
@@ -976,6 +1017,21 @@ function splitUsernames(value: string) {
     .split(/[\s,]+/)
     .map((username) => username.trim())
     .filter(Boolean);
+}
+
+function formatClientTime(value: {
+  createdAt?: number;
+  legacyTimeLabel?: string;
+  time?: string;
+}) {
+  if (typeof value.createdAt !== "number" || Number.isNaN(value.createdAt)) {
+    return value.legacyTimeLabel ?? value.time ?? "";
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(value.createdAt);
 }
 
 function getErrorMessage(error: unknown, fallback: string) {

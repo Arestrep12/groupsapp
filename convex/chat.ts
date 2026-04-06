@@ -10,6 +10,11 @@ import {
 
 type ReaderCtx = QueryCtx | MutationCtx;
 
+type ClientTimestamp = {
+  createdAt?: number;
+  legacyTimeLabel?: string;
+};
+
 const groupAccents = ["#eec861", "#b9dce3", "#d7c8f0", "#b8d7cb"] as const;
 
 const seedUsers = [
@@ -92,7 +97,6 @@ export const ensureSeedData = mutation({
       const conversationId = await ctx.db.insert("conversations", {
         name: group.name,
         preview: group.preview,
-        timeLabel: formatTimeLabel(createdAt),
         avatar: getInitials(group.name),
         accent: groupAccents[index % groupAccents.length],
         isActive: index === 0,
@@ -128,7 +132,6 @@ export const ensureSeedData = mutation({
           authorClerkId: message.authorClerkId,
           author: message.author,
           body: message.body,
-          timeLabel: formatTimeLabel(createdAt + messageIndex * 60_000),
           own: false,
           position: messageIndex,
           createdAt: createdAt + messageIndex * 60_000,
@@ -189,7 +192,11 @@ export const getChatData = query({
           name: conversation.name,
           avatar: conversation.avatar,
           preview: latestMessage?.body ?? conversation.preview,
-          time: latestMessage?.timeLabel ?? conversation.timeLabel,
+          createdAt:
+            latestMessage?.createdAt ??
+            latestMessage?._creationTime ??
+            conversation._creationTime,
+          legacyTimeLabel: latestMessage?.timeLabel ?? conversation.timeLabel,
           accent: conversation.accent,
           active: conversation._id === selectedConversation?._id,
           membersLabel: formatMembersLabel(memberCount),
@@ -321,7 +328,8 @@ export const getConversationDetail = query({
       messages: conversationMessages.map((message) => ({
         id: message._id,
         author: message.author,
-        time: message.timeLabel,
+        createdAt: message.createdAt ?? message._creationTime,
+        legacyTimeLabel: message.timeLabel,
         own: args.currentClerkId === message.authorClerkId,
         body: message.body,
       })),
@@ -412,7 +420,6 @@ export const createGroup = mutation({
     const conversationId = await ctx.db.insert("conversations", {
       name,
       preview: "Grupo creado. Empieza la conversación.",
-      timeLabel: formatTimeLabel(createdAt),
       avatar: getInitials(name),
       accent: groupAccents[existingConversations.length % groupAccents.length],
       isActive: existingConversations.length === 0,
@@ -617,7 +624,6 @@ export const sendMessage = mutation({
       authorClerkId: args.currentClerkId,
       author: getUserDisplayName(currentUser),
       body: trimmedBody,
-      timeLabel: formatTimeLabel(createdAt),
       own: false,
       position: existingMessages.length,
       createdAt,
@@ -625,7 +631,6 @@ export const sendMessage = mutation({
 
     await ctx.db.patch(args.conversationId, {
       preview: trimmedBody,
-      timeLabel: formatTimeLabel(createdAt),
     });
 
     return messageId;
@@ -831,14 +836,19 @@ function findLatestConversationMessage(
 ) {
   return messages
     .filter((message) => message.conversationId === conversationId)
-    .sort((left, right) => right.createdAt - left.createdAt)[0];
+    .sort(
+      (left, right) =>
+        getClientTimestamp(right).createdAt! - getClientTimestamp(left).createdAt!,
+    )[0];
 }
 
-function formatTimeLabel(value: number) {
-  return new Intl.DateTimeFormat("es-CO", {
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(value);
+function getClientTimestamp(
+  value: Pick<Doc<"messages">, "createdAt" | "timeLabel" | "_creationTime">,
+): ClientTimestamp {
+  return {
+    createdAt: value.createdAt ?? value._creationTime,
+    legacyTimeLabel: value.timeLabel,
+  };
 }
 
 function formatMembersLabel(memberCount: number) {

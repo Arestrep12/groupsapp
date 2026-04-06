@@ -15,7 +15,7 @@ export default defineSchema({
   conversations: defineTable({
     name: v.string(),
     preview: v.string(),
-    timeLabel: v.string(),
+    timeLabel: v.optional(v.string()),
     avatar: v.string(),
     accent: v.string(),
     isActive: v.boolean(),
@@ -42,7 +42,7 @@ export default defineSchema({
     authorClerkId: v.optional(v.string()),
     author: v.string(),
     body: v.string(),
-    timeLabel: v.string(),
+    timeLabel: v.optional(v.string()),
     own: v.boolean(),
     position: v.number(),
     createdAt: v.number(),
