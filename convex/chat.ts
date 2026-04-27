@@ -17,6 +17,13 @@ type ClientTimestamp = {
 
 const groupAccents = ["#eec861", "#b9dce3", "#d7c8f0", "#b8d7cb"] as const;
 
+const attachmentValidator = v.object({
+  storageId: v.id("_storage"),
+  name: v.string(),
+  contentType: v.string(),
+  size: v.number(),
+});
+
 const seedUsers = [
   {
     clerkId: "seed-jon",
@@ -68,7 +75,6 @@ const seedGroups = [
 
 export const ensureSeedData = mutation({
   args: {
-    clerkId: v.string(),
     email: v.optional(v.string()),
     firstName: v.optional(v.string()),
     lastName: v.optional(v.string()),
@@ -101,7 +107,7 @@ export const ensureSeedData = mutation({
         accent: groupAccents[index % groupAccents.length],
         isActive: index === 0,
         position: index,
-        createdByClerkId: args.clerkId,
+        createdByClerkId: currentUser.clerkId,
       });
 
       await ctx.db.insert("conversationMembers", {
@@ -144,15 +150,15 @@ export const ensureSeedData = mutation({
 });
 
 export const getChatData = query({
-  args: {
-    currentClerkId: v.optional(v.string()),
-  },
-  handler: async (ctx, args) => {
-    if (!args.currentClerkId) {
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+
+    if (!identity) {
       return emptyChatData();
     }
 
-    const currentUser = await getUserByClerkId(ctx, args.currentClerkId);
+    const currentUser = await getUserByClerkId(ctx, identity.subject);
 
     if (!currentUser) {
       return emptyChatData();
@@ -191,7 +197,9 @@ export const getChatData = query({
           id: conversation._id,
           name: conversation.name,
           avatar: conversation.avatar,
-          preview: latestMessage?.body ?? conversation.preview,
+          preview: latestMessage
+            ? formatConversationPreview(latestMessage)
+            : conversation.preview,
           createdAt:
             latestMessage?.createdAt ??
             latestMessage?._creationTime ??
@@ -214,14 +222,15 @@ export const getChatData = query({
 export const getConversationDetail = query({
   args: {
     conversationId: v.optional(v.id("conversations")),
-    currentClerkId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    if (!args.currentClerkId) {
+    const identity = await ctx.auth.getUserIdentity();
+
+    if (!identity) {
       return emptyConversationData();
     }
 
-    const currentUser = await getUserByClerkId(ctx, args.currentClerkId);
+    const currentUser = await getUserByClerkId(ctx, identity.subject);
 
     if (!currentUser) {
       return emptyConversationData();
@@ -299,7 +308,7 @@ export const getConversationDetail = query({
             member.username ||
             member.email ||
             "Usuario";
-          const isCurrentUser = member.clerkId === args.currentClerkId;
+          const isCurrentUser = member.clerkId === identity.subject;
 
           return {
             id: member._id,
@@ -325,32 +334,56 @@ export const getConversationDetail = query({
 
           return left.displayName.localeCompare(right.displayName);
         }),
-      messages: conversationMessages.map((message) => ({
-        id: message._id,
-        author: message.author,
-        createdAt: message.createdAt ?? message._creationTime,
-        legacyTimeLabel: message.timeLabel,
-        own: args.currentClerkId === message.authorClerkId,
-        body: message.body,
-      })),
+      messages: await Promise.all(
+        conversationMessages.map(async (message) => ({
+          id: message._id,
+          author: message.author,
+          createdAt: message.createdAt ?? message._creationTime,
+          legacyTimeLabel: message.timeLabel,
+          own: identity.subject === message.authorClerkId,
+          body: message.body,
+          attachments: await Promise.all(
+            (message.attachments ?? []).map(async (attachment) => ({
+              ...attachment,
+              url: await ctx.storage.getUrl(attachment.storageId),
+            })),
+          ),
+        })),
+      ),
     };
+  },
+});
+
+export const generateAttachmentUploadUrl = mutation({
+  args: {
+    conversationId: v.id("conversations"),
+  },
+  handler: async (ctx, args) => {
+    const currentUser = await requireCurrentUser(ctx);
+    const membership = await getConversationMembership(ctx, args.conversationId, currentUser._id);
+
+    if (!membership) {
+      throw new Error("No perteneces a este grupo.");
+    }
+
+    return await ctx.storage.generateUploadUrl();
   },
 });
 
 export const searchUsersByUsername = query({
   args: {
-    currentClerkId: v.optional(v.string()),
     conversationId: v.optional(v.id("conversations")),
     search: v.string(),
   },
   handler: async (ctx, args) => {
     const normalizedSearch = args.search.trim().toLowerCase();
+    const identity = await ctx.auth.getUserIdentity();
 
-    if (!normalizedSearch || !args.currentClerkId) {
+    if (!normalizedSearch || !identity) {
       return [];
     }
 
-    const currentUser = await getUserByClerkId(ctx, args.currentClerkId);
+    const currentUser = await getUserByClerkId(ctx, identity.subject);
 
     if (!currentUser) {
       return [];
@@ -397,7 +430,6 @@ export const searchUsersByUsername = query({
 
 export const createGroup = mutation({
   args: {
-    clerkId: v.string(),
     email: v.optional(v.string()),
     firstName: v.optional(v.string()),
     lastName: v.optional(v.string()),
@@ -424,7 +456,7 @@ export const createGroup = mutation({
       accent: groupAccents[existingConversations.length % groupAccents.length],
       isActive: existingConversations.length === 0,
       position: existingConversations.length,
-      createdByClerkId: args.clerkId,
+      createdByClerkId: currentUser.clerkId,
     });
 
     await ctx.db.insert("conversationMembers", {
@@ -453,12 +485,11 @@ export const createGroup = mutation({
 
 export const renameGroup = mutation({
   args: {
-    currentClerkId: v.string(),
     conversationId: v.id("conversations"),
     name: v.string(),
   },
   handler: async (ctx, args) => {
-    const currentUser = await requireUserByClerkId(ctx, args.currentClerkId);
+    const currentUser = await requireCurrentUser(ctx);
     await requireAdminMembership(ctx, args.conversationId, currentUser._id);
 
     const name = args.name.trim();
@@ -478,12 +509,11 @@ export const renameGroup = mutation({
 
 export const addGroupMemberByUsername = mutation({
   args: {
-    currentClerkId: v.string(),
     conversationId: v.id("conversations"),
     username: v.string(),
   },
   handler: async (ctx, args) => {
-    const currentUser = await requireUserByClerkId(ctx, args.currentClerkId);
+    const currentUser = await requireCurrentUser(ctx);
     await requireAdminMembership(ctx, args.conversationId, currentUser._id);
 
     const user = await findUserByUsername(ctx, args.username.trim());
@@ -520,12 +550,11 @@ export const addGroupMemberByUsername = mutation({
 
 export const removeGroupMember = mutation({
   args: {
-    currentClerkId: v.string(),
     conversationId: v.id("conversations"),
     memberUserId: v.id("users"),
   },
   handler: async (ctx, args) => {
-    const currentUser = await requireUserByClerkId(ctx, args.currentClerkId);
+    const currentUser = await requireCurrentUser(ctx);
     await requireAdminMembership(ctx, args.conversationId, currentUser._id);
 
     if (args.memberUserId === currentUser._id) {
@@ -553,13 +582,12 @@ export const removeGroupMember = mutation({
 
 export const setGroupMemberRole = mutation({
   args: {
-    currentClerkId: v.string(),
     conversationId: v.id("conversations"),
     memberUserId: v.id("users"),
     role: v.union(v.literal("admin"), v.literal("member")),
   },
   handler: async (ctx, args) => {
-    const currentUser = await requireUserByClerkId(ctx, args.currentClerkId);
+    const currentUser = await requireCurrentUser(ctx);
     await requireAdminMembership(ctx, args.conversationId, currentUser._id);
 
     const membership = await getConversationMembership(ctx, args.conversationId, args.memberUserId);
@@ -591,17 +619,18 @@ export const setGroupMemberRole = mutation({
 export const sendMessage = mutation({
   args: {
     conversationId: v.id("conversations"),
-    currentClerkId: v.string(),
     body: v.string(),
+    attachments: v.optional(v.array(attachmentValidator)),
   },
   handler: async (ctx, args) => {
     const trimmedBody = args.body.trim();
+    const attachments = args.attachments ?? [];
 
-    if (!trimmedBody) {
-      throw new Error("Message body is required.");
+    if (!trimmedBody && attachments.length === 0) {
+      throw new Error("Message body or attachment is required.");
     }
 
-    const currentUser = await requireUserByClerkId(ctx, args.currentClerkId);
+    const currentUser = await requireCurrentUser(ctx);
     const membership = await getConversationMembership(ctx, args.conversationId, currentUser._id);
 
     if (!membership) {
@@ -621,16 +650,17 @@ export const sendMessage = mutation({
 
     const messageId = await ctx.db.insert("messages", {
       conversationId: args.conversationId,
-      authorClerkId: args.currentClerkId,
+      authorClerkId: currentUser.clerkId,
       author: getUserDisplayName(currentUser),
       body: trimmedBody,
+      attachments,
       own: false,
       position: existingMessages.length,
       createdAt,
     });
 
     await ctx.db.patch(args.conversationId, {
-      preview: trimmedBody,
+      preview: trimmedBody || formatAttachmentPreview(attachments[0]),
     });
 
     return messageId;
@@ -647,6 +677,20 @@ function emptyChatData() {
     channels: [],
     activeConversationId: null,
   };
+}
+
+function formatAttachmentPreview(attachment?: { name: string }) {
+  if (!attachment) {
+    return "Adjunto";
+  }
+
+  return `Adjunto: ${attachment.name}`;
+}
+
+function formatConversationPreview(message: Doc<"messages">) {
+  const body = message.body.trim() || formatAttachmentPreview(message.attachments?.[0]);
+
+  return `${message.author}: ${body}`;
 }
 
 function emptyConversationData() {
@@ -674,10 +718,19 @@ async function requireUserByClerkId(ctx: MutationCtx, clerkId: string) {
   return user;
 }
 
+async function requireCurrentUser(ctx: MutationCtx) {
+  const identity = await ctx.auth.getUserIdentity();
+
+  if (!identity) {
+    throw new Error("Debes iniciar sesión para realizar esta acción.");
+  }
+
+  return await requireUserByClerkId(ctx, identity.subject);
+}
+
 async function upsertCurrentUser(
   ctx: MutationCtx,
   args: {
-    clerkId: string;
     email?: string;
     firstName?: string;
     lastName?: string;
@@ -685,45 +738,57 @@ async function upsertCurrentUser(
     imageUrl?: string;
   },
 ) {
-  const existingUser = await getUserByClerkId(ctx, args.clerkId);
+  const identity = await ctx.auth.getUserIdentity();
+
+  if (!identity) {
+    throw new Error("Debes iniciar sesión para sincronizar tu perfil.");
+  }
+
+  const clerkId = identity.subject;
+  const email = args.email ?? identity.email;
+  const firstName = args.firstName ?? identity.givenName;
+  const lastName = args.lastName ?? identity.familyName;
+  const username = args.username ?? identity.preferredUsername ?? identity.nickname;
+  const imageUrl = args.imageUrl ?? identity.pictureUrl;
+  const existingUser = await getUserByClerkId(ctx, clerkId);
 
   if (existingUser) {
     await ctx.db.patch(existingUser._id, {
-      email: args.email,
-      firstName: args.firstName,
-      lastName: args.lastName,
-      username: args.username,
-      imageUrl: args.imageUrl,
+      email,
+      firstName,
+      lastName,
+      username,
+      imageUrl,
     });
 
     return {
       ...existingUser,
-      email: args.email,
-      firstName: args.firstName,
-      lastName: args.lastName,
-      username: args.username,
-      imageUrl: args.imageUrl,
+      email,
+      firstName,
+      lastName,
+      username,
+      imageUrl,
     };
   }
 
   const userId = await ctx.db.insert("users", {
-    clerkId: args.clerkId,
-    email: args.email,
-    firstName: args.firstName,
-    lastName: args.lastName,
-    username: args.username,
-    imageUrl: args.imageUrl,
+    clerkId,
+    email,
+    firstName,
+    lastName,
+    username,
+    imageUrl,
   });
 
   return {
     _id: userId,
     _creationTime: Date.now(),
-    clerkId: args.clerkId,
-    email: args.email,
-    firstName: args.firstName,
-    lastName: args.lastName,
-    username: args.username,
-    imageUrl: args.imageUrl,
+    clerkId,
+    email,
+    firstName,
+    lastName,
+    username,
+    imageUrl,
   };
 }
 

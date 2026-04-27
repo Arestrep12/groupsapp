@@ -42,6 +42,16 @@ export default defineSchema({
     authorClerkId: v.optional(v.string()),
     author: v.string(),
     body: v.string(),
+    attachments: v.optional(
+      v.array(
+        v.object({
+          storageId: v.id("_storage"),
+          name: v.string(),
+          contentType: v.string(),
+          size: v.number(),
+        }),
+      ),
+    ),
     timeLabel: v.optional(v.string()),
     own: v.boolean(),
     position: v.number(),

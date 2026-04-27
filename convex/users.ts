@@ -17,7 +17,6 @@ export const upsertFromClerk = internalMutation({
 
 export const ensureCurrentUser = mutation({
   args: {
-    clerkId: v.string(),
     email: v.optional(v.string()),
     firstName: v.optional(v.string()),
     lastName: v.optional(v.string()),
@@ -25,7 +24,20 @@ export const ensureCurrentUser = mutation({
     imageUrl: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    return await upsertUser(ctx, args);
+    const identity = await ctx.auth.getUserIdentity();
+
+    if (!identity) {
+      throw new Error("Debes iniciar sesión para sincronizar tu perfil.");
+    }
+
+    return await upsertUser(ctx, {
+      clerkId: identity.subject,
+      email: args.email ?? identity.email,
+      firstName: args.firstName ?? identity.givenName,
+      lastName: args.lastName ?? identity.familyName,
+      username: args.username ?? identity.preferredUsername ?? identity.nickname,
+      imageUrl: args.imageUrl ?? identity.pictureUrl,
+    });
   },
 });
 

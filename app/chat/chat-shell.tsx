@@ -2,6 +2,7 @@
 
 import { useUser } from "@clerk/nextjs";
 import { useMutation, useQuery } from "convex/react";
+import Image from "next/image";
 import {
   startTransition,
   useDeferredValue,
@@ -41,6 +42,15 @@ type ChatMessage = {
   time?: string;
   own: boolean;
   body: string;
+  attachments: MessageAttachment[];
+};
+
+type MessageAttachment = {
+  storageId: Id<"_storage">;
+  name: string;
+  contentType: string;
+  size: number;
+  url: string | null;
 };
 
 type GroupMember = {
@@ -121,6 +131,9 @@ function ConvexChatShell() {
   const ensureCurrentUser = useMutation(api.users.ensureCurrentUser);
   const ensureSeedData = useMutation(api.chat.ensureSeedData);
   const sendMessage = useMutation(api.chat.sendMessage);
+  const generateAttachmentUploadUrl = useMutation(
+    api.chat.generateAttachmentUploadUrl,
+  );
   const createGroup = useMutation(api.chat.createGroup);
   const renameGroup = useMutation(api.chat.renameGroup);
   const addGroupMemberByUsername = useMutation(
@@ -132,6 +145,9 @@ function ConvexChatShell() {
     Id<"conversations"> | undefined
   >(undefined);
   const [draft, setDraft] = useState("");
+  const [selectedAttachment, setSelectedAttachment] = useState<File | null>(
+    null,
+  );
   const [status, setStatus] = useState("Sincronizando usuario...");
   const [isSending, setIsSending] = useState(false);
   const [isCreatingGroup, setIsCreatingGroup] = useState(false);
@@ -147,16 +163,13 @@ function ConvexChatShell() {
     useState<ActiveConversationData>(emptyActiveConversationData);
 
   const data = useQuery(api.chat.getChatData, {
-    currentClerkId: user?.id,
   });
   const conversationData = useQuery(api.chat.getConversationDetail, {
     conversationId: selectedConversationId,
-    currentClerkId: user?.id,
   });
   const deferredInviteUsername = useDeferredValue(inviteUsername.trim());
   const userSuggestions =
     useQuery(api.chat.searchUsersByUsername, {
-      currentClerkId: user?.id,
       conversationId: selectedConversationId,
       search: deferredInviteUsername,
     }) ?? [];
@@ -170,14 +183,13 @@ function ConvexChatShell() {
     }
 
     void ensureCurrentUser({
-      clerkId: user.id,
       email: user.primaryEmailAddress?.emailAddress,
       firstName: user.firstName ?? undefined,
       lastName: user.lastName ?? undefined,
       username: user.username ?? undefined,
       imageUrl: user.imageUrl,
     }).then(
-      () => setStatus("Usuario sincronizado con Convex."),
+      () => setStatus("Sincronizado."),
       () => setStatus("No fue posible sincronizar el usuario."),
     );
   }, [
@@ -197,14 +209,13 @@ function ConvexChatShell() {
     }
 
     void ensureSeedData({
-      clerkId: user.id,
       email: user.primaryEmailAddress?.emailAddress,
       firstName: user.firstName ?? undefined,
       lastName: user.lastName ?? undefined,
       username: user.username ?? undefined,
       imageUrl: user.imageUrl,
     }).then(
-      () => setStatus("Grupos listos desde Convex."),
+      () => setStatus("Sincronizado."),
       () => setStatus("No fue posible inicializar los grupos."),
     );
   }, [
@@ -264,7 +275,7 @@ function ConvexChatShell() {
 
     const trimmedDraft = draft.trim();
 
-    if (!trimmedDraft) {
+    if (!trimmedDraft && !selectedAttachment) {
       return;
     }
 
@@ -272,12 +283,17 @@ function ConvexChatShell() {
     setStatus("Enviando mensaje...");
 
     try {
+      const attachments = selectedAttachment
+        ? [await uploadAttachment(activeConversation.id, selectedAttachment)]
+        : [];
+
       await sendMessage({
         conversationId: activeConversation.id,
-        currentClerkId: user.id,
         body: trimmedDraft,
+        attachments,
       });
       setDraft("");
+      setSelectedAttachment(null);
       setStatus("Mensaje enviado.");
     } catch (error) {
       setStatus("No fue posible enviar el mensaje.");
@@ -285,6 +301,33 @@ function ConvexChatShell() {
     } finally {
       setIsSending(false);
     }
+  }
+
+  async function uploadAttachment(
+    conversationId: Id<"conversations">,
+    file: File,
+  ) {
+    const postUrl = await generateAttachmentUploadUrl({ conversationId });
+    const result = await fetch(postUrl, {
+      method: "POST",
+      headers: { "Content-Type": file.type || "application/octet-stream" },
+      body: file,
+    });
+
+    if (!result.ok) {
+      throw new Error("No fue posible subir el adjunto.");
+    }
+
+    const { storageId } = (await result.json()) as {
+      storageId: Id<"_storage">;
+    };
+
+    return {
+      storageId,
+      name: file.name,
+      contentType: file.type || "application/octet-stream",
+      size: file.size,
+    };
   }
 
   async function handleCreateGroup() {
@@ -297,7 +340,6 @@ function ConvexChatShell() {
 
     try {
       const conversationId = await createGroup({
-        clerkId: user.id,
         email: user.primaryEmailAddress?.emailAddress,
         firstName: user.firstName ?? undefined,
         lastName: user.lastName ?? undefined,
@@ -333,7 +375,6 @@ function ConvexChatShell() {
 
     try {
       await renameGroup({
-        currentClerkId: user.id,
         conversationId: activeConversation.id,
         name: renameDraft,
       });
@@ -358,7 +399,6 @@ function ConvexChatShell() {
 
     try {
       const result = await addGroupMemberByUsername({
-        currentClerkId: user.id,
         conversationId: activeConversation.id,
         username,
       });
@@ -395,7 +435,6 @@ function ConvexChatShell() {
 
     try {
       await removeGroupMember({
-        currentClerkId: user.id,
         conversationId: activeConversation.id,
         memberUserId,
       });
@@ -420,7 +459,6 @@ function ConvexChatShell() {
 
     try {
       await setGroupMemberRole({
-        currentClerkId: user.id,
         conversationId: activeConversation.id,
         memberUserId: member.id,
         role: member.role === "admin" ? "member" : "admin",
@@ -447,7 +485,7 @@ function ConvexChatShell() {
         conversationData={emptyActiveConversationData}
         data={emptyData}
         draftDisabled
-        status={status}
+        status={status === "Usuario sincronizado con Convex." ? "Sincronizado." : status}
       />
     );
   }
@@ -479,7 +517,9 @@ function ConvexChatShell() {
       onCreateGroupNameChange={setGroupName}
       onCreateGroupUsernamesChange={setGroupMembersText}
       onDraftChange={setDraft}
+      onRemoveAttachment={() => setSelectedAttachment(null)}
       onInviteUsernameChange={setInviteUsername}
+      onSelectAttachment={setSelectedAttachment}
       onRemoveMember={handleRemoveMember}
       onRenameDraftChange={setRenameDraft}
       onRenameGroup={handleRenameGroup}
@@ -495,6 +535,7 @@ function ConvexChatShell() {
       onToggleCreateGroup={() => setShowCreateGroup((current) => !current)}
       onToggleManageGroup={() => setIsManagingGroup((current) => !current)}
       renameDraft={renameDraft}
+      selectedAttachment={selectedAttachment}
       showCreateGroup={showCreateGroup}
       status={status}
     />
@@ -513,11 +554,14 @@ function ChatLayout({
   renameDraft = "",
   inviteUsername = "",
   inviteSuggestions = [],
+  selectedAttachment,
   notice,
   isCreatingGroup = false,
   isManagingGroup = false,
   isSubmittingAdminAction = false,
   onDraftChange,
+  onSelectAttachment,
+  onRemoveAttachment,
   onSelectConversation,
   onSendMessage,
   onToggleCreateGroup,
@@ -544,11 +588,14 @@ function ChatLayout({
   renameDraft?: string;
   inviteUsername?: string;
   inviteSuggestions?: UserSuggestion[];
+  selectedAttachment?: File | null;
   notice?: TopNotice | null;
   isCreatingGroup?: boolean;
   isManagingGroup?: boolean;
   isSubmittingAdminAction?: boolean;
   onDraftChange?: (value: string) => void;
+  onSelectAttachment?: (file: File) => void;
+  onRemoveAttachment?: () => void;
   onSelectConversation?: (conversationId: Id<"conversations">) => void;
   onSendMessage?: () => void;
   onToggleCreateGroup?: () => void;
@@ -566,6 +613,9 @@ function ChatLayout({
 }) {
   const { user } = useUser();
   const messagesViewportRef = useRef<HTMLDivElement | null>(null);
+  const attachmentInputRef = useRef<HTMLInputElement | null>(null);
+  const [previewAttachment, setPreviewAttachment] =
+    useState<MessageAttachment | null>(null);
   const workspaceName =
     user?.username ?? user?.firstName ?? data.workspace.name;
   const workspaceInitials =
@@ -622,22 +672,19 @@ function ChatLayout({
               <SignOutButton />
             </div>
 
-            <div className="mt-8 rounded-[20px] border border-[#dbe3df] bg-white/85 p-4 shadow-[0_12px_30px_rgba(26,39,44,0.04)]">
-              <div className="flex items-center justify-between">
-                <p className="text-[13px] font-semibold text-[#6e7579]">
-                  Nuevo grupo
-                </p>
-                <button
-                  className="rounded-full bg-[#e8f7fb] px-3 py-1 text-[12px] font-medium text-[#2f6d77]"
-                  onClick={onToggleCreateGroup}
-                  type="button"
-                >
-                  {showCreateGroup ? "Cerrar" : "Crear"}
-                </button>
-              </div>
+            <div className="mt-7">
+              <button
+                aria-label={showCreateGroup ? "Cerrar creación de grupo" : "Crear grupo"}
+                className="group flex h-11 w-11 items-center justify-center rounded-2xl border border-[#dbe3df] bg-white/85 text-[24px] leading-none text-[#2f6d77] shadow-[0_12px_30px_rgba(26,39,44,0.04)] transition hover:bg-[#e8f7fb]"
+                onClick={onToggleCreateGroup}
+                title={showCreateGroup ? "Cerrar" : "Crear grupo"}
+                type="button"
+              >
+                {showCreateGroup ? "×" : "+"}
+              </button>
 
               {showCreateGroup ? (
-                <div className="mt-4 space-y-3">
+                <div className="mt-3 space-y-3 rounded-[18px] border border-[#dbe3df] bg-white/85 p-4 shadow-[0_12px_30px_rgba(26,39,44,0.04)]">
                   <input
                     className="w-full rounded-2xl border border-[#d7ddda] bg-[#fcfcfb] px-4 py-3 text-[14px] outline-none"
                     onChange={(event) =>
@@ -663,15 +710,10 @@ function ChatLayout({
                     {isCreatingGroup ? "Creando..." : "Crear grupo"}
                   </button>
                 </div>
-              ) : (
-                <p className="mt-3 text-[13px] leading-6 text-[#7d858a]">
-                  El creador queda como admin y puede invitar usuarios por su
-                  username.
-                </p>
-              )}
+              ) : null}
             </div>
 
-            <div className="mt-10">
+            <div className="mt-8">
               <div className="flex items-center justify-between">
                 <p className="text-[13px] font-semibold text-[#6e7579]">
                   Tus grupos
@@ -713,32 +755,16 @@ function ChatLayout({
               </div>
             </div>
 
-            <div className="mt-10">
-              <p className="text-[13px] font-semibold text-[#6e7579]">
-                Flujos activos
-              </p>
-              <div className="mt-4 space-y-2">
-                {data.channels.map((channel) => (
-                  <div
-                    key={channel.name}
-                    className="flex items-center gap-3 rounded-xl px-4 py-3 text-[14px] text-[#5e686d]"
-                  >
-                    <span style={{ color: channel.color }}>•</span>
-                    <span>{channel.name}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
           </div>
         </aside>
 
         <section className="flex min-h-screen flex-col bg-white lg:h-full lg:min-h-0 lg:overflow-hidden">
-          <header className="shrink-0 border-b border-[#e7e7e1] px-6 py-4">
+          <header className="shrink-0 border-b border-[#e7e7e1] px-6 py-3">
             {conversationData.activeConversation ? (
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex items-center gap-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex items-center gap-3">
                   <div
-                    className="flex h-14 w-14 items-center justify-center rounded-full text-sm font-medium text-[#263036]"
+                    className="flex h-10 w-10 items-center justify-center rounded-full text-[12px] font-medium text-[#263036]"
                     style={{
                       backgroundColor:
                         conversationData.activeConversation.badgeColor,
@@ -747,10 +773,10 @@ function ChatLayout({
                     {conversationData.activeConversation.badge}
                   </div>
                   <div>
-                    <h2 className="text-[18px] font-semibold text-[#232b30]">
+                    <h2 className="text-[16px] font-semibold text-[#232b30]">
                       {conversationData.activeConversation.name}
                     </h2>
-                    <p className="mt-1 text-[14px] text-[#4a95a0]">
+                    <p className="mt-0.5 text-[13px] text-[#4a95a0]">
                       {conversationData.activeConversation.membersLabel}
                     </p>
                   </div>
@@ -758,11 +784,25 @@ function ChatLayout({
 
                 {conversationData.activeConversation.canManageGroup ? (
                   <button
-                    className="rounded-full border border-[#d6ddda] px-4 py-2 text-[13px] font-medium text-[#495257]"
+                    aria-label={isManagingGroup ? "Cerrar administración" : "Administrar grupo"}
+                    className="flex h-10 w-10 items-center justify-center rounded-full border border-[#d6ddda] text-[#495257] transition hover:bg-[#f5f8f7]"
                     onClick={onToggleManageGroup}
+                    title={isManagingGroup ? "Cerrar administración" : "Administrar grupo"}
                     type="button"
                   >
-                    {isManagingGroup ? "Cerrar admin" : "Administrar grupo"}
+                    <svg
+                      aria-hidden="true"
+                      className="h-5 w-5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="1.8"
+                      viewBox="0 0 24 24"
+                    >
+                      <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
+                      <path d="M19.4 15a1.8 1.8 0 0 0 .36 1.98l.05.05a2.1 2.1 0 1 1-2.97 2.97l-.05-.05a1.8 1.8 0 0 0-1.98-.36 1.8 1.8 0 0 0-1.09 1.65V21.3a2.1 2.1 0 1 1-4.2 0v-.07a1.8 1.8 0 0 0-1.09-1.65 1.8 1.8 0 0 0-1.98.36l-.05.05a2.1 2.1 0 1 1-2.97-2.97l.05-.05A1.8 1.8 0 0 0 4.6 15a1.8 1.8 0 0 0-1.65-1.09H2.9a2.1 2.1 0 1 1 0-4.2h.07A1.8 1.8 0 0 0 4.6 8.62a1.8 1.8 0 0 0-.36-1.98l-.05-.05A2.1 2.1 0 1 1 7.16 3.6l.05.05a1.8 1.8 0 0 0 1.98.36 1.8 1.8 0 0 0 1.09-1.65V2.3a2.1 2.1 0 1 1 4.2 0v.07a1.8 1.8 0 0 0 1.09 1.65 1.8 1.8 0 0 0 1.98-.36l.05-.05a2.1 2.1 0 1 1 2.97 2.97l-.05.05a1.8 1.8 0 0 0-.36 1.98 1.8 1.8 0 0 0 1.65 1.09h.07a2.1 2.1 0 1 1 0 4.2h-.07A1.8 1.8 0 0 0 19.4 15Z" />
+                    </svg>
                   </button>
                 ) : null}
               </div>
@@ -921,39 +961,47 @@ function ChatLayout({
           ) : null}
 
           <div
-            className="flex-1 px-6 py-8 lg:min-h-0 lg:overflow-y-auto lg:pr-4 scroll-shell"
+            className="flex-1 px-6 py-4 lg:min-h-0 lg:overflow-y-auto lg:pr-4 scroll-shell"
             ref={messagesViewportRef}
           >
             {conversationData.messages.length ? (
               conversationData.messages.map((message, index) => {
                 if (message.own) {
                   return (
-                    <div key={message.id} className={index > 0 ? "mt-8" : ""}>
-                      <div className="ml-auto max-w-[720px] rounded-[22px] bg-[#e8f7fb] px-6 py-4 text-[17px] leading-8 text-[#283136]">
-                        {message.body}
+                    <div key={message.id} className={index > 0 ? "mt-2" : ""}>
+                      <div className="ml-auto max-w-[720px] rounded-[18px] bg-[#e8f7fb] px-5 py-2.5 text-[16px] leading-6 text-[#283136]">
+                        {message.body ? <p>{message.body}</p> : null}
+                        <MessageAttachments
+                          attachments={message.attachments}
+                          onPreview={setPreviewAttachment}
+                        />
+                        <p className="mt-1 text-right text-[11px] leading-none text-[#7c8489]">
+                          {formatClientTime(message)}
+                        </p>
                       </div>
-                      <p className="mt-2 text-right text-[13px] text-[#7c8489]">
-                        {formatClientTime(message)}
-                      </p>
                     </div>
                   );
                 }
 
                 return (
-                  <div
-                    key={message.id}
-                    className={index > 0 ? "mt-3" : "mt-16"}
-                  >
+                  <div key={message.id} className={index > 0 ? "mt-2" : ""}>
                     <div className="flex items-end gap-3">
                       <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[#eec861] text-[15px] text-[#fffdf8]">
                         {message.author.slice(0, 2).toUpperCase()}
                       </div>
                       <div>
                         <p className="mb-2 text-[13px] text-[#7c8489]">
-                          {message.author} {formatClientTime(message)}
+                          {message.author}
                         </p>
-                        <div className="max-w-[390px] rounded-[18px] bg-[#f3f5f5] px-5 py-4 text-[17px] text-[#283136]">
-                          {message.body}
+                        <div className="max-w-[390px] rounded-[18px] bg-[#f3f5f5] px-4 py-2.5 text-[16px] leading-6 text-[#283136]">
+                          {message.body ? <p>{message.body}</p> : null}
+                          <MessageAttachments
+                            attachments={message.attachments}
+                            onPreview={setPreviewAttachment}
+                          />
+                          <p className="mt-1 text-right text-[11px] leading-none text-[#7c8489]">
+                            {formatClientTime(message)}
+                          </p>
                         </div>
                       </div>
                     </div>
@@ -991,24 +1039,179 @@ function ChatLayout({
                 placeholder="Escribe un mensaje para este grupo"
                 value={draft}
               />
+              {selectedAttachment ? (
+                <div className="mt-3 flex items-center justify-between gap-3 rounded-2xl border border-[#dbe4e0] bg-[#f8fbfa] px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-[14px] font-medium text-[#30393e]">
+                      {selectedAttachment.name}
+                    </p>
+                    <p className="mt-1 text-[12px] text-[#7b8589]">
+                      {getFileExtension(selectedAttachment.name).toUpperCase()} ·{" "}
+                      {formatFileSize(selectedAttachment.size)}
+                    </p>
+                  </div>
+                  <button
+                    className="shrink-0 rounded-full border border-[#d6ddda] px-3 py-2 text-[12px] font-medium text-[#596368]"
+                    onClick={() => {
+                      onRemoveAttachment?.();
+                      if (attachmentInputRef.current) {
+                        attachmentInputRef.current.value = "";
+                      }
+                    }}
+                    type="button"
+                  >
+                    Quitar
+                  </button>
+                </div>
+              ) : null}
               <div className="mt-3 flex items-center justify-between">
                 <div className="text-[13px] text-[#7b8186]">
                   Solo los miembros del grupo pueden escribir.
                 </div>
-                <button
-                  className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#bbe4eb] text-[18px] text-white disabled:bg-[#d5e5e8]"
-                  disabled={draftDisabled || !draft.trim()}
-                  onClick={onSendMessage}
-                  type="button"
-                >
-                  ➤
-                </button>
+                <div className="flex items-center gap-2">
+                  <input
+                    className="sr-only"
+                    disabled={draftDisabled}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+
+                      if (file) {
+                        onSelectAttachment?.(file);
+                      }
+                    }}
+                    ref={attachmentInputRef}
+                    type="file"
+                  />
+                  <button
+                    aria-label="Adjuntar archivo"
+                    className="flex h-11 w-11 items-center justify-center rounded-xl border border-[#d6ddda] bg-white text-[20px] text-[#4d8190] disabled:text-[#b8c2c5]"
+                    disabled={draftDisabled}
+                    onClick={() => attachmentInputRef.current?.click()}
+                    title="Adjuntar archivo"
+                    type="button"
+                  >
+                    +
+                  </button>
+                  <button
+                    className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#bbe4eb] text-[18px] text-white disabled:bg-[#d5e5e8]"
+                    disabled={draftDisabled || (!draft.trim() && !selectedAttachment)}
+                    onClick={onSendMessage}
+                    type="button"
+                  >
+                    ➤
+                  </button>
+                </div>
               </div>
             </div>
           </div>
         </section>
       </div>
+
+      {previewAttachment ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[#151b1f]/72 px-5 py-6 backdrop-blur-sm"
+          onClick={() => setPreviewAttachment(null)}
+          role="presentation"
+        >
+          <div
+            aria-label={`Preview de ${previewAttachment.name}`}
+            aria-modal="true"
+            className="max-h-full w-full max-w-5xl overflow-hidden rounded-[24px] bg-white shadow-[0_30px_90px_rgba(0,0,0,0.28)]"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <div className="flex items-center justify-between gap-4 border-b border-[#e6ece9] px-5 py-4">
+              <div className="min-w-0">
+                <p className="truncate text-[15px] font-medium text-[#253036]">
+                  {previewAttachment.name}
+                </p>
+                <p className="mt-1 text-[12px] text-[#748085]">
+                  {getFileExtension(previewAttachment.name).toUpperCase()} ·{" "}
+                  {formatFileSize(previewAttachment.size)}
+                </p>
+              </div>
+              <button
+                className="shrink-0 rounded-full border border-[#d6ddda] px-4 py-2 text-[13px] font-medium text-[#4b555a]"
+                onClick={() => setPreviewAttachment(null)}
+                type="button"
+              >
+                Cerrar
+              </button>
+            </div>
+            <div className="max-h-[78vh] overflow-auto bg-[#f7f9f8] p-5">
+              {previewAttachment.url ? (
+                <Image
+                  alt={previewAttachment.name}
+                  className="mx-auto max-h-[72vh] max-w-full rounded-[16px] object-contain"
+                  height={900}
+                  src={previewAttachment.url}
+                  unoptimized
+                  width={1200}
+                />
+              ) : (
+                <p className="px-4 py-8 text-center text-[14px] text-[#748085]">
+                  No fue posible cargar la previsualización.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
+  );
+}
+
+function MessageAttachments({
+  attachments,
+  onPreview,
+}: {
+  attachments: MessageAttachment[];
+  onPreview: (attachment: MessageAttachment) => void;
+}) {
+  if (attachments.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mt-3 space-y-2">
+      {attachments.map((attachment) => {
+        const label = `${getFileExtension(attachment.name).toUpperCase()} · ${formatFileSize(
+          attachment.size,
+        )}`;
+
+        const isPreviewableImage =
+          attachment.contentType.startsWith("image/") && Boolean(attachment.url);
+        const AttachmentElement = isPreviewableImage ? "button" : "a";
+
+        return (
+          <AttachmentElement
+            className="flex w-full items-center gap-3 rounded-2xl border border-[#d1e2e5] bg-white/70 px-4 py-3 text-left text-[14px] leading-5 text-[#2e3b40] transition hover:bg-white"
+            href={!isPreviewableImage ? (attachment.url ?? undefined) : undefined}
+            key={attachment.storageId}
+            onClick={
+              isPreviewableImage
+                ? () => onPreview(attachment)
+                : undefined
+            }
+            rel={!isPreviewableImage ? "noreferrer" : undefined}
+            target={!isPreviewableImage ? "_blank" : undefined}
+            type={isPreviewableImage ? "button" : undefined}
+          >
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#e8f7fb] text-[12px] font-semibold text-[#4d8190]">
+              {getFileExtension(attachment.name).toUpperCase()}
+            </span>
+            <span className="min-w-0">
+              <span className="block truncate font-medium">
+                {attachment.name}
+              </span>
+              <span className="mt-0.5 block text-[12px] text-[#718085]">
+                {label}
+              </span>
+            </span>
+          </AttachmentElement>
+        );
+      })}
+    </div>
   );
 }
 
@@ -1032,6 +1235,24 @@ function formatClientTime(value: {
     hour: "numeric",
     minute: "2-digit",
   }).format(value.createdAt);
+}
+
+function getFileExtension(fileName: string) {
+  const extension = fileName.split(".").pop();
+
+  return extension && extension !== fileName ? extension : "FILE";
+}
+
+function formatFileSize(size: number) {
+  if (size < 1024) {
+    return `${size} B`;
+  }
+
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`;
+  }
+
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function getErrorMessage(error: unknown, fallback: string) {

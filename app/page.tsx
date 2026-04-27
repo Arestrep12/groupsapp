@@ -1,5 +1,4 @@
 import { auth } from "@clerk/nextjs/server";
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { SignInForm } from "./sign-in-form";
 
@@ -26,27 +25,9 @@ export default async function Home() {
                 <h1 className="mt-4 font-[family-name:var(--font-display)] text-5xl leading-none">
                   Iniciar sesión
                 </h1>
-                <p className="mt-4 text-sm leading-7 text-[var(--muted-strong)]">
-                  Clerk entrará aquí. Por ahora dejamos la experiencia visual y la
-                  base de datos migradas a Convex.
-                </p>
               </div>
 
               <SignInForm />
-
-              <div className="mt-4 rounded-[18px] border border-[#b8d7cb] bg-[#f2fbf6] px-4 py-3 text-sm text-[#3f6d56]">
-                Login real con Clerk usando esta misma UI. Convex sigue como backend.
-              </div>
-
-              <div className="mt-8 text-center text-sm text-[var(--muted-strong)]">
-                ¿No tienes cuenta?{" "}
-                <Link
-                  className="underline decoration-black/15 underline-offset-4 transition hover:decoration-black/40"
-                  href="/signup"
-                >
-                  Crear una
-                </Link>
-              </div>
             </div>
           </div>
         </section>

@@ -70,7 +70,7 @@ export function SignInForm() {
           className="field-input"
           name="nickname"
           onChange={(event) => setIdentifier(event.target.value)}
-          placeholder="tu_nickname"
+          placeholder="Nickname"
           type="text"
           value={identifier}
         />
@@ -94,7 +94,6 @@ export function SignInForm() {
           <input className="h-4 w-4 accent-[var(--accent-deep)]" disabled type="checkbox" />
           <span>Recordarme</span>
         </label>
-        <span className="underline decoration-black/15 underline-offset-4">Clerk custom flow</span>
       </div>
 
       {error ? (
