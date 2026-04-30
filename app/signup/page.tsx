@@ -1,5 +1,4 @@
 import { auth } from "@clerk/nextjs/server";
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { SignUpForm } from "./sign-up-form";
 
@@ -33,20 +32,6 @@ export default async function SignupPage() {
               </div>
 
               <SignUpForm />
-
-              <div className="mt-4 rounded-[18px] border border-[#b8d7cb] bg-[#f2fbf6] px-4 py-3 text-sm text-[#3f6d56]">
-                Alta real con Clerk usando formulario propio. Convex queda como backend principal.
-              </div>
-
-              <div className="mt-8 text-center text-sm text-[var(--muted-strong)]">
-                ¿Ya tienes cuenta?{" "}
-                <Link
-                  className="underline decoration-black/15 underline-offset-4 transition hover:decoration-black/40"
-                  href="/"
-                >
-                  Inicia sesión
-                </Link>
-              </div>
             </div>
           </div>
         </section>

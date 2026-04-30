@@ -72,7 +72,7 @@ export function SignUpForm() {
           className="field-input"
           name="nickname"
           onChange={(event) => setUsername(event.target.value)}
-          placeholder="elige_tu_nickname"
+          placeholder="Elige tu Nickname"
           type="text"
           value={username}
         />
@@ -90,11 +90,6 @@ export function SignUpForm() {
           value={password}
         />
       </label>
-
-      <div className="rounded-[18px] border border-black/6 bg-white/60 px-4 py-3 text-sm leading-6 text-[var(--muted-strong)]">
-        Este flujo asume que en Clerk habilitarás registro con `username + password`
-        sin pasos extra.
-      </div>
 
       <div className="min-h-0" id="clerk-captcha" />
 
